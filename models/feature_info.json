@@ -1,0 +1,38 @@
+{
+  "best_model": "Lasso Regression",
+  "numeric_features": [
+    "age",
+    "bmi",
+    "children",
+    "is_obese",
+    "smoker_obese",
+    "age_bmi",
+    "has_children",
+    "age_smoker"
+  ],
+  "categorical_features": [
+    "sex",
+    "smoker",
+    "region",
+    "age_group",
+    "bmi_category",
+    "family_size"
+  ],
+  "all_features": [
+    "age",
+    "bmi",
+    "children",
+    "is_obese",
+    "smoker_obese",
+    "age_bmi",
+    "has_children",
+    "age_smoker",
+    "sex",
+    "smoker",
+    "region",
+    "age_group",
+    "bmi_category",
+    "family_size"
+  ],
+  "target_column": "charges"
+}
