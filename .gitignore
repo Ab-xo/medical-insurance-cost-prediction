@@ -13,7 +13,21 @@ __pycache__/
 .coverage
 htmlcov/
 model_outputs/
-outputs/
+
+# Ignore generated output files but keep the folder structure
+outputs/**
+!outputs/
+!outputs/.gitkeep
+!outputs/figures/
+!outputs/figures/.gitkeep
+!outputs/figures/eda/
+!outputs/figures/eda/.gitkeep
+!outputs/figures/evaluation/
+!outputs/figures/evaluation/.gitkeep
+!outputs/metrics/
+!outputs/metrics/.gitkeep
+!outputs/reports/
+!outputs/reports/.gitkeep
 models/*.pkl
 models/*.joblib
 *.sqlite3
