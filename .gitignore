@@ -18,4 +18,6 @@ models/*.pkl
 models/*.joblib
 *.sqlite3
 *.db
-*.csv
+
+# Keep data folder but ignore large external datasets (not insurance.csv)
+# insurance.csv is small (< 100KB) and committed intentionally for reproducibility
