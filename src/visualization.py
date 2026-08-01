@@ -1,0 +1,688 @@
+"""
+EDA and model evaluation visualisations — Medical Insurance Cost Prediction.
+
+All figures saved to outputs/figures/:
+  eda/        — exploratory data analysis
+  evaluation/ — model evaluation (residuals, learning curves, comparisons)
+
+Design principles:
+  • Dark figure background (#0f1117) to match the dashboard dark theme
+  • Large, readable fonts — titles 15pt, axis labels 12pt, ticks 10pt
+  • Consistent colour palette: blue=#4f8ef7, red=#f76f6f, green=#4fbe8c, amber=#f5a623
+  • Heatmap and pairplot at significantly larger sizes so every annotation is legible
+  • All plots use tight_layout + bbox_inches='tight' to prevent clipping
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+import numpy as np
+import pandas as pd
+import seaborn as sns
+
+from src.utils import (
+    EDA_DIR, EVAL_DIR, TARGET_COLUMN,
+    ensure_output_dirs, get_logger,
+)
+
+log = get_logger("visualization")
+
+# ── Palette ───────────────────────────────────────────────────────────────────
+C_BLUE    = "#4f8ef7"
+C_RED     = "#f76f6f"
+C_GREEN   = "#4fbe8c"
+C_AMBER   = "#f5a623"
+C_PURPLE  = "#a78bfa"
+C_MUTED   = "#8b95a8"
+
+BG_DARK   = "#0f1117"
+BG_PANEL  = "#1a1d27"
+BG_AXES   = "#141720"
+GRID_COL  = "#2a2d3a"
+TEXT_COL  = "#e2e8f0"
+TEXT_DIM  = "#94a3b8"
+
+PALETTE_SMOKER = {"yes": C_RED, "no": C_BLUE}
+
+# ── Global rcParams (applied once at import time) ─────────────────────────────
+RC = {
+    "figure.facecolor":      BG_DARK,
+    "axes.facecolor":        BG_AXES,
+    "axes.edgecolor":        GRID_COL,
+    "axes.labelcolor":       TEXT_COL,
+    "axes.titlecolor":       TEXT_COL,
+    "axes.titlesize":        15,
+    "axes.labelsize":        12,
+    "axes.titlepad":         14,
+    "axes.grid":             True,
+    "grid.color":            GRID_COL,
+    "grid.linewidth":        0.6,
+    "xtick.color":           TEXT_DIM,
+    "ytick.color":           TEXT_DIM,
+    "xtick.labelsize":       10,
+    "ytick.labelsize":       10,
+    "legend.facecolor":      BG_PANEL,
+    "legend.edgecolor":      GRID_COL,
+    "legend.labelcolor":     TEXT_COL,
+    "legend.fontsize":       10,
+    "figure.dpi":            130,
+    "savefig.facecolor":     BG_DARK,
+    "savefig.edgecolor":     BG_DARK,
+    "text.color":            TEXT_COL,
+    "lines.linewidth":       2.0,
+}
+plt.rcParams.update(RC)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _save(fig: plt.Figure, name: str, subdir: str = "eda") -> Path:
+    ensure_output_dirs()
+    folder = EDA_DIR if subdir == "eda" else EVAL_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{name}.png"
+    fig.savefig(path, bbox_inches="tight", facecolor=BG_DARK)
+    plt.close(fig)
+    log.info("Saved → %s", path)
+    return path
+
+
+def _safe_name(model_name: str) -> str:
+    return model_name.lower().replace(" ", "_")
+
+
+def _fmt_usd(ax: plt.Axes, axis: str = "y") -> None:
+    """Format axis ticks as $K."""
+    fmt = mticker.FuncFormatter(lambda x, _: f"${x/1000:.0f}K")
+    if axis == "y":
+        ax.yaxis.set_major_formatter(fmt)
+    else:
+        ax.xaxis.set_major_formatter(fmt)
+
+
+def _spine_style(ax: plt.Axes) -> None:
+    """Remove top/right spines and soften remaining."""
+    for spine in ["top", "right"]:
+        ax.spines[spine].set_visible(False)
+    for spine in ["left", "bottom"]:
+        ax.spines[spine].set_color(GRID_COL)
+
+
+def _title(ax: plt.Axes, text: str) -> None:
+    ax.set_title(text, fontsize=15, fontweight="bold", color=TEXT_COL, pad=14)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EDA PLOTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def plot_charges_distribution(df: pd.DataFrame) -> Path:
+    """Histogram + KDE of charges with mean/median reference lines."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    sns.histplot(df[TARGET_COLUMN], bins=55, kde=True, ax=ax,
+                 color=C_BLUE, edgecolor=BG_DARK, alpha=0.85,
+                 line_kws={"lw": 2.5})
+
+    mean_v   = df[TARGET_COLUMN].mean()
+    median_v = df[TARGET_COLUMN].median()
+    ax.axvline(mean_v,   color=C_RED,   lw=2,   ls="--", label=f"Mean   ${mean_v:,.0f}")
+    ax.axvline(median_v, color=C_AMBER, lw=2,   ls=":",  label=f"Median ${median_v:,.0f}")
+
+    _fmt_usd(ax, axis="x")
+    ax.set_xlabel("Annual Charges (USD)", fontsize=12)
+    ax.set_ylabel("Count", fontsize=12)
+    _title(ax, "Insurance Charges Distribution")
+    ax.legend()
+    _spine_style(ax)
+    return _save(fig, "charges_distribution")
+
+
+def plot_charges_by_smoker(df: pd.DataFrame) -> Path:
+    """Split violin + box showing smoker vs non-smoker charges."""
+    fig, ax = plt.subplots(figsize=(10, 6))
+    order = ["no", "yes"]
+
+    plot_df = df.copy()
+    plot_df["smoker_label"] = plot_df["smoker"].map({"no": "Non-Smoker", "yes": "Smoker"})
+    label_order = ["Non-Smoker", "Smoker"]
+    pal = {"Non-Smoker": C_BLUE, "Smoker": C_RED}
+
+    sns.violinplot(data=plot_df, x="smoker_label", y=TARGET_COLUMN, order=label_order,
+                   hue="smoker_label", palette=pal, inner=None, alpha=0.35,
+                   legend=False, ax=ax)
+    sns.boxplot(data=plot_df, x="smoker_label", y=TARGET_COLUMN, order=label_order,
+                hue="smoker_label", palette=pal, width=0.25, fliersize=3,
+                linewidth=1.5, legend=False, ax=ax,
+                boxprops=dict(alpha=0.8))
+
+    means = plot_df.groupby("smoker_label")[TARGET_COLUMN].mean()
+    for i, s in enumerate(label_order):
+        ax.text(i + 0.17, means[s], f"μ = ${means[s]:,.0f}",
+                va="center", fontsize=10, color=TEXT_COL, fontweight="bold")
+
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(label_order, fontsize=11)
+    ax.set_xlabel("")
+    ax.set_ylabel("Annual Charges (USD)", fontsize=12)
+    _fmt_usd(ax, axis="y")
+    _title(ax, "Charges by Smoker Status")
+    _spine_style(ax)
+    return _save(fig, "charges_by_smoker")
+
+
+def plot_charges_by_region(df: pd.DataFrame) -> Path:
+    """Boxplot of charges by region, sorted by median."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    order = (df.groupby("region")[TARGET_COLUMN]
+               .median()
+               .sort_values(ascending=False)
+               .index.tolist())
+    region_palette = dict(zip(order, [C_BLUE, C_PURPLE, C_GREEN, C_AMBER]))
+
+    sns.boxplot(data=df, x="region", y=TARGET_COLUMN, order=order,
+                hue="region", palette=region_palette, width=0.45, fliersize=3,
+                linewidth=1.5, legend=False, ax=ax)
+
+    _fmt_usd(ax, axis="y")
+    ax.set_xlabel("Region", fontsize=12)
+    ax.set_ylabel("Annual Charges (USD)", fontsize=12)
+    _title(ax, "Insurance Charges by Region")
+    _spine_style(ax)
+    return _save(fig, "charges_by_region")
+
+
+def plot_charges_by_bmi_category(df: pd.DataFrame) -> Path:
+    """Grouped boxplot: BMI category × smoker status."""
+    if "bmi_category" not in df.columns:
+        return None
+    fig, ax = plt.subplots(figsize=(13, 6))
+    cat_order = [c for c in ["underweight", "normal", "overweight", "obese"]
+                 if c in df["bmi_category"].unique()]
+
+    sns.boxplot(data=df, x="bmi_category", y=TARGET_COLUMN,
+                hue="smoker", order=cat_order,
+                palette=PALETTE_SMOKER, width=0.5, fliersize=3,
+                linewidth=1.5, ax=ax)
+
+    _fmt_usd(ax, axis="y")
+    ax.set_xlabel("BMI Category", fontsize=12)
+    ax.set_ylabel("Annual Charges (USD)", fontsize=12)
+    ax.legend(title="Smoker", title_fontsize=10)
+    _title(ax, "Charges by BMI Category & Smoker Status")
+    _spine_style(ax)
+    return _save(fig, "charges_by_bmi_category")
+
+
+def plot_age_vs_charges(df: pd.DataFrame) -> Path:
+    """Scatter age vs charges, coloured by smoker, with trend lines."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    for s_val, grp in df.groupby("smoker"):
+        ax.scatter(grp["age"], grp[TARGET_COLUMN],
+                   label=f"{'Smoker' if s_val=='yes' else 'Non-Smoker'}",
+                   color=PALETTE_SMOKER[s_val],
+                   alpha=0.55, s=22, zorder=3)
+        # trend line
+        z = np.polyfit(grp["age"], grp[TARGET_COLUMN], 1)
+        xs = np.linspace(grp["age"].min(), grp["age"].max(), 100)
+        ax.plot(xs, np.poly1d(z)(xs), color=PALETTE_SMOKER[s_val],
+                lw=2, ls="--", alpha=0.8)
+
+    _fmt_usd(ax, axis="y")
+    ax.set_xlabel("Age", fontsize=12)
+    ax.set_ylabel("Annual Charges (USD)", fontsize=12)
+    ax.legend(fontsize=10)
+    _title(ax, "Age vs Insurance Charges")
+    _spine_style(ax)
+    return _save(fig, "age_vs_charges")
+
+
+def plot_bmi_vs_charges(df: pd.DataFrame) -> Path:
+    """Scatter BMI vs charges with obese threshold and trend lines."""
+    fig, ax = plt.subplots(figsize=(11, 6))
+    for s_val, grp in df.groupby("smoker"):
+        ax.scatter(grp["bmi"], grp[TARGET_COLUMN],
+                   label=f"{'Smoker' if s_val=='yes' else 'Non-Smoker'}",
+                   color=PALETTE_SMOKER[s_val],
+                   alpha=0.55, s=22, zorder=3)
+
+    ax.axvline(30, color=C_MUTED, ls="--", lw=1.5,
+               label="BMI 30 (obese threshold)", zorder=2)
+
+    _fmt_usd(ax, axis="y")
+    ax.set_xlabel("BMI (kg/m²)", fontsize=12)
+    ax.set_ylabel("Annual Charges (USD)", fontsize=12)
+    ax.legend(fontsize=10)
+    _title(ax, "BMI vs Insurance Charges")
+    _spine_style(ax)
+    return _save(fig, "bmi_vs_charges")
+
+
+def plot_age_distribution(df: pd.DataFrame) -> Path:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.histplot(df["age"], bins=30, kde=True, ax=ax,
+                 color=C_BLUE, edgecolor=BG_DARK, alpha=0.85,
+                 line_kws={"lw": 2.5})
+    ax.axvline(df["age"].mean(), color=C_RED, lw=2, ls="--",
+               label=f"Mean {df['age'].mean():.1f} yrs")
+    ax.set_xlabel("Age (years)", fontsize=12)
+    ax.set_ylabel("Count", fontsize=12)
+    ax.legend()
+    _title(ax, "Age Distribution")
+    _spine_style(ax)
+    return _save(fig, "age_distribution")
+
+
+def plot_bmi_distribution(df: pd.DataFrame) -> Path:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.histplot(df["bmi"], bins=40, kde=True, ax=ax,
+                 color=C_GREEN, edgecolor=BG_DARK, alpha=0.85,
+                 line_kws={"lw": 2.5})
+    ax.axvline(30, color=C_RED, lw=2, ls="--", label="Obese threshold (30)")
+    ax.axvline(df["bmi"].mean(), color=C_AMBER, lw=2, ls=":",
+               label=f"Mean BMI {df['bmi'].mean():.1f}")
+    ax.set_xlabel("BMI (kg/m²)", fontsize=12)
+    ax.set_ylabel("Count", fontsize=12)
+    ax.legend()
+    _title(ax, "BMI Distribution")
+    _spine_style(ax)
+    return _save(fig, "bmi_distribution")
+
+
+def plot_children_vs_charges(df: pd.DataFrame) -> Path:
+    fig, ax = plt.subplots(figsize=(9, 6))
+    avg = df.groupby("children")[TARGET_COLUMN].agg(["mean", "median"]).reset_index()
+    x   = np.arange(len(avg))
+    w   = 0.35
+    ax.bar(x - w / 2, avg["mean"],   width=w, label="Mean",   color=C_BLUE,  alpha=0.85)
+    ax.bar(x + w / 2, avg["median"], width=w, label="Median", color=C_GREEN, alpha=0.85)
+    _fmt_usd(ax, axis="y")
+    ax.set_xlabel("Number of Dependants", fontsize=12)
+    ax.set_ylabel("Charges (USD)", fontsize=12)
+    ax.set_xticks(x)
+    ax.set_xticklabels(avg["children"].astype(str))
+    ax.legend()
+    _title(ax, "Average Charges by Number of Dependants")
+    _spine_style(ax)
+    return _save(fig, "children_vs_charges")
+
+
+def plot_sex_distribution(df: pd.DataFrame) -> Path:
+    fig, ax = plt.subplots(figsize=(7, 5))
+    counts = df["sex"].value_counts()
+    sex_pal = {"male": C_BLUE, "female": C_RED}
+    colors  = [sex_pal.get(s, C_BLUE) for s in counts.index]
+    bars    = ax.bar(counts.index, counts.values,
+                     color=colors, alpha=0.85, width=0.4)
+    ax.bar_label(bars, labels=[f"{v:,}" for v in counts.values],
+                 padding=4, fontsize=11, color=TEXT_COL)
+    ax.set_xlabel("Sex", fontsize=12)
+    ax.set_ylabel("Count", fontsize=12)
+    ax.set_ylim(0, counts.max() * 1.15)
+    _title(ax, "Sex Distribution")
+    _spine_style(ax)
+    return _save(fig, "sex_distribution")
+
+
+def plot_correlation_heatmap(df: pd.DataFrame) -> Path:
+    """Large, fully readable correlation heatmap with bigger annotations."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    corr = df[num_cols].corr()
+    n    = len(num_cols)
+
+    # Scale figure to number of features — minimum 14×11
+    fig_w = max(14, n * 1.5)
+    fig_h = max(11, n * 1.2)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+
+    mask = np.triu(np.ones_like(corr, dtype=bool))
+    sns.heatmap(
+        corr, mask=mask,
+        annot=True, fmt=".2f",
+        annot_kws={"size": 11, "weight": "bold", "color": TEXT_COL},
+        cmap="coolwarm", center=0,
+        linewidths=1.0, linecolor=BG_DARK,
+        square=True, ax=ax,
+        cbar_kws={"shrink": 0.75, "pad": 0.02},
+        vmin=-1, vmax=1,
+    )
+    # Style colorbar
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelcolor=TEXT_COL, labelsize=10)
+    cbar.ax.yaxis.label.set_color(TEXT_COL)
+
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=40, ha="right",
+                       fontsize=10, color=TEXT_COL)
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0,
+                       fontsize=10, color=TEXT_COL)
+    _title(ax, "Correlation Heatmap — Numeric Features")
+    fig.patch.set_facecolor(BG_DARK)
+    ax.set_facecolor(BG_AXES)
+    return _save(fig, "correlation_heatmap")
+
+
+def plot_pairplot(df: pd.DataFrame) -> Path:
+    """Large, clean pairplot — key features coloured by smoker."""
+    cols   = ["age", "bmi", "children", TARGET_COLUMN]
+    sample = df[cols + ["smoker"]].dropna()
+    if len(sample) > 600:
+        sample = sample.sample(600, random_state=42)
+
+    # Temporarily apply a seaborn style that respects our RC
+    with plt.rc_context(RC):
+        g = sns.pairplot(
+            sample, hue="smoker",
+            palette=PALETTE_SMOKER,
+            diag_kind="kde",
+            plot_kws={"alpha": 0.45, "s": 18, "linewidth": 0},
+            diag_kws={"lw": 2},
+            height=3.2, aspect=1.0,
+        )
+        g.fig.set_size_inches(14, 13)
+        g.fig.patch.set_facecolor(BG_DARK)
+
+        for ax in g.axes.flatten():
+            if ax:
+                ax.set_facecolor(BG_AXES)
+                ax.grid(True, color=GRID_COL, lw=0.5)
+                for spine in ax.spines.values():
+                    spine.set_edgecolor(GRID_COL)
+                ax.tick_params(colors=TEXT_DIM, labelsize=9)
+                ax.xaxis.label.set_color(TEXT_COL)
+                ax.yaxis.label.set_color(TEXT_COL)
+
+        # Rename charges label to be readable
+        for ax in g.axes[-1]:
+            if ax:
+                ax.set_xlabel(ax.get_xlabel().replace(TARGET_COLUMN, "Charges ($)"),
+                              fontsize=10)
+        for ax in g.axes[:, 0]:
+            if ax:
+                ax.set_ylabel(ax.get_ylabel().replace(TARGET_COLUMN, "Charges ($)"),
+                              fontsize=10)
+
+        g.fig.suptitle("Pairplot — Key Features by Smoker Status",
+                       y=1.01, fontsize=15, fontweight="bold", color=TEXT_COL)
+
+        legend = g.legend
+        if legend:
+            legend.get_frame().set_facecolor(BG_PANEL)
+            legend.get_frame().set_edgecolor(GRID_COL)
+            for text in legend.get_texts():
+                text.set_color(TEXT_COL)
+
+        ensure_output_dirs()
+        path = EDA_DIR / "pairplot.png"
+        g.savefig(path, bbox_inches="tight", facecolor=BG_DARK)
+        plt.close("all")
+        log.info("Saved → %s", path)
+        return path
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# EVALUATION PLOTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def plot_model_comparison(metrics_df: pd.DataFrame) -> Path:
+    fig, ax = plt.subplots(figsize=(11, 6))
+    df = metrics_df.sort_values("rmse", ascending=True)
+    colors = [C_GREEN if i == 0 else C_BLUE for i in range(len(df))]
+    bars = ax.barh(df["model"], df["rmse"], color=colors, alpha=0.85)
+    ax.bar_label(bars, labels=[f"${v:,.0f}" for v in df["rmse"]],
+                 padding=5, fontsize=10, color=TEXT_COL)
+    ax.xaxis.set_major_formatter(mticker.FuncFormatter(lambda x, _: f"${x/1000:.0f}K"))
+    ax.set_xlabel("RMSE (USD)", fontsize=12)
+    _title(ax, "Model Comparison — RMSE (lower is better)")
+    _spine_style(ax)
+    ax.set_xlim(0, df["rmse"].max() * 1.18)
+    return _save(fig, "model_comparison_rmse", subdir="evaluation")
+
+
+def plot_model_comparison_r2(metrics_df: pd.DataFrame) -> Path:
+    fig, ax = plt.subplots(figsize=(11, 6))
+    df = metrics_df.sort_values("r2", ascending=False)
+    colors = [C_GREEN if i == 0 else C_BLUE for i in range(len(df))]
+    bars = ax.barh(df["model"], df["r2"], color=colors, alpha=0.85)
+    ax.bar_label(bars, labels=[f"{v:.4f}" for v in df["r2"]],
+                 padding=5, fontsize=10, color=TEXT_COL)
+    ax.set_xlabel("R² Score", fontsize=12)
+    _title(ax, "Model Comparison — R² Score (higher is better)")
+    _spine_style(ax)
+    ax.set_xlim(0, df["r2"].max() * 1.12)
+    return _save(fig, "model_comparison_r2", subdir="evaluation")
+
+
+def plot_leaderboard(metrics_df: pd.DataFrame) -> Path:
+    df = metrics_df.sort_values("rmse").copy()
+    models = df["model"].tolist()
+    x = np.arange(len(models))
+    w = 0.28
+
+    def norm(s: pd.Series) -> pd.Series:
+        r = s.max() - s.min()
+        return (s - s.min()) / r if r else s * 0
+
+    rmse_n = norm(df["rmse"])           # lower=better → invert
+    mae_n  = norm(df["mae"])
+    r2_n   = 1 - norm(df["r2"])        # invert so lower bar = worse
+
+    fig, ax = plt.subplots(figsize=(14, 6))
+    ax.bar(x - w,   1 - rmse_n, w, label="RMSE score (↑ better)",  color=C_BLUE,   alpha=0.85)
+    ax.bar(x,       1 - mae_n,  w, label="MAE score  (↑ better)",   color=C_GREEN,  alpha=0.85)
+    ax.bar(x + w,   1 - r2_n,   w, label="R² score   (↑ better)",   color=C_AMBER,  alpha=0.85)
+    ax.set_xticks(x)
+    ax.set_xticklabels(models, rotation=32, ha="right", fontsize=9)
+    ax.set_ylabel("Normalised Score (higher = better)", fontsize=11)
+    ax.set_ylim(0, 1.15)
+    ax.legend(fontsize=10)
+    _title(ax, "Multi-Metric Model Leaderboard")
+    _spine_style(ax)
+    return _save(fig, "model_leaderboard", subdir="evaluation")
+
+
+def plot_residuals(y_true: np.ndarray, y_pred: np.ndarray, model_name: str) -> Path:
+    residuals = y_true - y_pred
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+
+    sns.histplot(residuals, bins=40, kde=True, ax=axes[0],
+                 color=C_BLUE, edgecolor=BG_DARK, alpha=0.8,
+                 line_kws={"lw": 2.5})
+    axes[0].axvline(0, color=C_RED, lw=2, ls="--")
+    axes[0].xaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _: f"${x/1000:.0f}K"))
+    axes[0].set_xlabel("Residual (USD)", fontsize=12)
+    axes[0].set_ylabel("Count", fontsize=12)
+    _title(axes[0], "Residual Distribution")
+    _spine_style(axes[0])
+
+    axes[1].scatter(y_pred, residuals, alpha=0.45, s=18, color=C_BLUE, zorder=3)
+    axes[1].axhline(0, color=C_RED, lw=2, ls="--", zorder=4)
+    axes[1].xaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _: f"${x/1000:.0f}K"))
+    axes[1].yaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _: f"${x/1000:.0f}K"))
+    axes[1].set_xlabel("Predicted Charges (USD)", fontsize=12)
+    axes[1].set_ylabel("Residual (USD)", fontsize=12)
+    _title(axes[1], "Residuals vs Predicted")
+    _spine_style(axes[1])
+
+    fig.suptitle(model_name, fontsize=13, color=TEXT_DIM, y=1.01)
+    return _save(fig, f"residuals_{_safe_name(model_name)}", subdir="evaluation")
+
+
+def plot_prediction_vs_actual(y_true: np.ndarray, y_pred: np.ndarray,
+                               model_name: str) -> Path:
+    fig, ax = plt.subplots(figsize=(8, 7))
+    ax.scatter(y_true, y_pred, alpha=0.45, s=20, color=C_BLUE, zorder=3)
+    lo = min(y_true.min(), y_pred.min())
+    hi = max(y_true.max(), y_pred.max())
+    ax.plot([lo, hi], [lo, hi], color=C_RED, lw=2, ls="--",
+            label="Perfect prediction", zorder=4)
+    fmt = mticker.FuncFormatter(lambda x, _: f"${x/1000:.0f}K")
+    ax.xaxis.set_major_formatter(fmt)
+    ax.yaxis.set_major_formatter(fmt)
+    ax.set_xlabel("Actual Charges (USD)", fontsize=12)
+    ax.set_ylabel("Predicted Charges (USD)", fontsize=12)
+    ax.legend()
+    _title(ax, f"Predicted vs Actual — {model_name}")
+    _spine_style(ax)
+    return _save(fig, f"pred_vs_actual_{_safe_name(model_name)}", subdir="evaluation")
+
+
+def plot_learning_curve(lc_data: dict, model_name: str) -> Path:
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sizes = lc_data["train_sizes"]
+    ax.plot(sizes, lc_data["train_scores"], "o-", color=C_BLUE,
+            lw=2.2, ms=6, label="Train R²")
+    ax.plot(sizes, lc_data["val_scores"],   "o-", color=C_RED,
+            lw=2.2, ms=6, label="Validation R²")
+    ax.fill_between(sizes, lc_data["train_scores"], lc_data["val_scores"],
+                    alpha=0.12, color=C_MUTED)
+    ax.set_xlabel("Training Set Size", fontsize=12)
+    ax.set_ylabel("R² Score", fontsize=12)
+    ax.legend()
+    _title(ax, f"Learning Curve — {model_name}")
+    _spine_style(ax)
+    return _save(fig, f"learning_curve_{_safe_name(model_name)}", subdir="evaluation")
+
+
+def plot_feature_importance(pipeline: Any, feature_names: list[str],
+                             model_name: str) -> Path | None:
+    estimator = pipeline.named_steps.get("regressor", pipeline)
+    if not hasattr(estimator, "feature_importances_"):
+        return None
+    imps = estimator.feature_importances_
+    idx  = np.argsort(imps)[::-1][:15]
+    names  = [feature_names[i] for i in idx]
+    values = imps[idx]
+
+    fig, ax = plt.subplots(figsize=(11, 7))
+    colors = [C_GREEN if i == 0 else C_BLUE for i in range(len(names))]
+    bars = ax.barh(names[::-1], values[::-1], color=colors[::-1], alpha=0.85)
+    ax.bar_label(bars, labels=[f"{v:.3f}" for v in values[::-1]],
+                 padding=4, fontsize=9, color=TEXT_COL)
+    ax.set_xlabel("Importance", fontsize=12)
+    ax.set_xlim(0, values.max() * 1.18)
+    _title(ax, f"Feature Importance — {model_name}")
+    _spine_style(ax)
+    return _save(fig, f"feature_importance_{_safe_name(model_name)}", subdir="evaluation")
+
+
+def plot_coefficients(pipeline: Any, feature_names: list[str],
+                      model_name: str) -> Path | None:
+    estimator = pipeline.named_steps.get("regressor", pipeline)
+    if not hasattr(estimator, "coef_"):
+        return None
+    coefs = estimator.coef_.ravel()
+    idx   = np.argsort(np.abs(coefs))[::-1][:15]
+    names = [feature_names[i] for i in idx]
+    vals  = coefs[idx]
+
+    fig, ax = plt.subplots(figsize=(11, 7))
+    colors = [C_RED if v < 0 else C_BLUE for v in vals[::-1]]
+    ax.barh(names[::-1], vals[::-1], color=colors, alpha=0.85)
+    ax.axvline(0, color=TEXT_DIM, lw=1)
+    ax.xaxis.set_major_formatter(
+        mticker.FuncFormatter(lambda x, _: f"${x:,.0f}"))
+    ax.set_xlabel("Coefficient Value (USD)", fontsize=12)
+    _title(ax, f"Top Coefficients — {model_name}")
+    _spine_style(ax)
+    return _save(fig, f"coefficients_{_safe_name(model_name)}", subdir="evaluation")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MASTER GENERATORS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def generate_all_eda_figures(df: pd.DataFrame) -> list[Path]:
+    log.info("Generating EDA figures...")
+    paths: list[Path] = []
+    fns = [
+        plot_charges_distribution,
+        plot_charges_by_smoker,
+        plot_charges_by_region,
+        plot_charges_by_bmi_category,
+        plot_age_vs_charges,
+        plot_bmi_vs_charges,
+        plot_age_distribution,
+        plot_bmi_distribution,
+        plot_children_vs_charges,
+        plot_sex_distribution,
+        plot_correlation_heatmap,
+        plot_pairplot,
+    ]
+    for fn in fns:
+        try:
+            p = fn(df)
+            if p:
+                paths.append(p)
+        except Exception as exc:
+            log.warning("EDA plot %s failed: %s", fn.__name__, exc)
+    log.info("EDA figures complete: %d saved.", len(paths))
+    return paths
+
+
+def generate_all_evaluation_figures(
+    metrics_df: pd.DataFrame,
+    fitted_models: dict[str, Any],
+    predictions: dict[str, np.ndarray],
+    y_test: pd.Series,
+    lc_data: dict[str, dict] | None = None,
+) -> list[Path]:
+    log.info("Generating evaluation figures...")
+    paths: list[Path] = []
+
+    paths.append(plot_model_comparison(metrics_df))
+    paths.append(plot_model_comparison_r2(metrics_df))
+    paths.append(plot_leaderboard(metrics_df))
+
+    for name, y_pred in predictions.items():
+        y_true = y_test.values
+        for fn, args in [
+            (plot_residuals,            (y_true, y_pred, name)),
+            (plot_prediction_vs_actual, (y_true, y_pred, name)),
+        ]:
+            try:
+                paths.append(fn(*args))
+            except Exception as e:
+                log.warning("%s failed for %s: %s", fn.__name__, name, e)
+
+        pipeline = fitted_models.get(name)
+        if pipeline:
+            try:
+                ct = pipeline.named_steps["preprocessor"]
+                feat_names: list[str] = []
+                for tname, transformer, cols in ct.transformers_:
+                    if tname == "num":
+                        feat_names.extend(cols)
+                    elif tname == "cat":
+                        enc = transformer.named_steps["encoder"]
+                        feat_names.extend(enc.get_feature_names_out(cols).tolist())
+
+                for fn, args in [
+                    (plot_feature_importance, (pipeline, feat_names, name)),
+                    (plot_coefficients,       (pipeline, feat_names, name)),
+                ]:
+                    try:
+                        p = fn(*args)
+                        if p:
+                            paths.append(p)
+                    except Exception as e:
+                        log.warning("%s failed for %s: %s", fn.__name__, name, e)
+            except Exception as e:
+                log.warning("feature extraction failed for %s: %s", name, e)
+
+    if lc_data:
+        for name, lc in lc_data.items():
+            try:
+                paths.append(plot_learning_curve(lc, name))
+            except Exception as e:
+                log.warning("learning_curve failed for %s: %s", name, e)
+
+    log.info("Evaluation figures complete: %d saved.", len(paths))
+    return paths

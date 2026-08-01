@@ -20,7 +20,7 @@ Run from the project root:
 Models trained
 --------------
   Required (7):
-    Linear Regression, Ridge, Lasso,
+    Linear Regression, Ridge (RidgeCV), Lasso (LassoCV),
     Decision Tree, Random Forest, Gradient Boosting, SVR
 
   Bonus (3):
@@ -46,10 +46,8 @@ from sklearn.ensemble import (
     GradientBoostingRegressor,
     RandomForestRegressor,
 )
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import Lasso, LinearRegression, Ridge
+from sklearn.linear_model import LassoCV, LinearRegression, RidgeCV
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.svm import SVR
 from sklearn.tree import DecisionTreeRegressor
 
@@ -62,18 +60,19 @@ from src.evaluate import (
     select_best_model,
 )
 from src.feature_engineering import engineer_features, get_all_feature_groups
-from src.preprocessing import clean_dataframe, get_feature_names_out, split_data
+from src.preprocessing import build_preprocessor, clean_dataframe, get_feature_names_out, split_data
 from src.utils import (
     METRICS_DIR,
     MODELS_DIR,
-    REPORTS_DIR,
     RANDOM_STATE,
+    REPORTS_DIR,
     TARGET_COLUMN,
     ensure_output_dirs,
     get_logger,
     load_raw_data,
     save_json,
 )
+from src.visualization import generate_all_eda_figures, generate_all_evaluation_figures
 
 log = get_logger("train")
 
@@ -93,45 +92,86 @@ SCALED_MODELS = {
 def _get_model_registry() -> dict[str, Any]:
     """
     Return all regression estimators to compare.
-
-    XGBoost is added only when the package is installed — if not present
-    the rest of training still runs without errors.
     """
     registry: dict[str, Any] = {
         # ── Required 7 ──────────────────────────────────────────────────────
-        "Linear Regression":        LinearRegression(),
-        "Ridge Regression":         Ridge(alpha=10.0, random_state=RANDOM_STATE),
-        "Lasso Regression":         Lasso(alpha=1.0,  random_state=RANDOM_STATE, max_iter=10_000),
-        "Decision Tree Regressor":  DecisionTreeRegressor(random_state=RANDOM_STATE, max_depth=10),
-        "Random Forest Regressor":  RandomForestRegressor(
-                                        n_estimators=200, random_state=RANDOM_STATE,
-                                        max_depth=12, n_jobs=-1,
-                                    ),
-        "Gradient Boosting Regressor": GradientBoostingRegressor(
-                                        n_estimators=200, random_state=RANDOM_STATE,
-                                        max_depth=4, learning_rate=0.05, subsample=0.8,
-                                    ),
-        "Support Vector Regressor": SVR(kernel="rbf", C=1000, gamma="scale", epsilon=0.1),
+        "Linear Regression": LinearRegression(),
 
+        # RidgeCV searches over 20 log-spaced alphas (0.01 → 1000) using
+        # leave-one-out CV internally — zero extra compute vs a fixed alpha.
+        "Ridge Regression": RidgeCV(
+            alphas=[0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 5.0,
+                    10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0],
+            scoring="neg_root_mean_squared_error",
+        ),
+
+        # LassoCV uses coordinate descent with 5-fold CV to find the best
+        # alpha from 100 automatically generated candidates on the regularisation
+        # path — guarantees the shrinkage level is data-driven, not guessed.
+        "Lasso Regression": LassoCV(
+            alphas=100,        # generates 100 candidates on the reg path
+            cv=5,
+            max_iter=50_000,
+            random_state=RANDOM_STATE,
+            n_jobs=-1,
+        ),
+        "Decision Tree Regressor": DecisionTreeRegressor(
+            random_state=RANDOM_STATE,
+            max_depth=6,
+            min_samples_leaf=10,
+        ),
+        "Random Forest Regressor": RandomForestRegressor(
+            n_estimators=300,
+            random_state=RANDOM_STATE,
+            max_depth=10,
+            min_samples_leaf=5,
+            max_features=0.7,
+            n_jobs=-1,
+        ),
+        "Gradient Boosting Regressor": GradientBoostingRegressor(
+            n_estimators=300,
+            random_state=RANDOM_STATE,
+            max_depth=4,
+            learning_rate=0.03,
+            subsample=0.8,
+            min_samples_leaf=5,
+        ),
+        "Support Vector Regressor": SVR(
+            kernel="rbf",
+            C=5000,
+            gamma="scale",
+            epsilon=200,
+        ),
         # ── Bonus ────────────────────────────────────────────────────────────
-        "Extra Trees Regressor":    ExtraTreesRegressor(
-                                        n_estimators=200, random_state=RANDOM_STATE,
-                                        max_depth=12, n_jobs=-1,
-                                    ),
-        "AdaBoost Regressor":       AdaBoostRegressor(
-                                        n_estimators=100, random_state=RANDOM_STATE,
-                                        learning_rate=0.1,
-                                    ),
+        "Extra Trees Regressor": ExtraTreesRegressor(
+            n_estimators=300,
+            random_state=RANDOM_STATE,
+            max_depth=10,
+            min_samples_leaf=5,
+            max_features=0.7,
+            n_jobs=-1,
+        ),
+        "AdaBoost Regressor": AdaBoostRegressor(
+            n_estimators=200,
+            random_state=RANDOM_STATE,
+            learning_rate=0.05,
+        ),
     }
 
     # XGBoost — optional bonus model
     try:
         from xgboost import XGBRegressor
+
         registry["XGBoost Regressor"] = XGBRegressor(
-            n_estimators=200, random_state=RANDOM_STATE,
-            max_depth=4, learning_rate=0.05,
-            subsample=0.8, colsample_bytree=0.8,
-            verbosity=0, n_jobs=-1,
+            n_estimators=300,
+            random_state=RANDOM_STATE,
+            max_depth=4,
+            learning_rate=0.03,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            min_child_weight=5,
+            verbosity=0,
+            n_jobs=-1,
         )
         log.info("XGBoost found — added to registry.")
     except ImportError:
@@ -152,41 +192,17 @@ def _build_pipeline(
 ) -> Pipeline:
     """
     Wrap an estimator in a full sklearn Pipeline with preprocessing.
-
-    Scaling is applied only for models that need it (SCALED_MODELS).
-    Tree-based models skip StandardScaler — they are scale-invariant and
-    scaling adds noise to their split decisions.
     """
     scale = model_name in SCALED_MODELS
-
-    # Numeric branch
-    num_steps: list[tuple] = [("imputer", SimpleImputer(strategy="median"))]
-    if scale:
-        num_steps.append(("scaler", StandardScaler()))
-    num_pipe = Pipeline(steps=num_steps)
-
-    # Categorical branch
-    cat_pipe = Pipeline(steps=[
-        ("imputer", SimpleImputer(strategy="most_frequent")),
-        ("encoder", OneHotEncoder(
-            drop="first",
-            handle_unknown="ignore",
-            sparse_output=False,
-        )),
-    ])
-
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ("num", num_pipe, numeric_features),
-            ("cat", cat_pipe, categorical_features),
-        ],
-        remainder="drop",
-        verbose_feature_names_out=False,
+    preprocessor = build_preprocessor(
+        scale_numeric=scale,
+        numeric_features=numeric_features,
+        categorical_features=categorical_features,
     )
 
     return Pipeline(steps=[
         ("preprocessor", preprocessor),
-        ("regressor",    estimator),
+        ("regressor", estimator),
     ])
 
 
@@ -198,7 +214,7 @@ def _feature_names_from_pipeline(pipeline: Pipeline) -> list[str]:
         if tname == "num":
             names.extend(cols)
         elif tname == "cat":
-            enc: OneHotEncoder = transformer.named_steps["encoder"]
+            enc = transformer.named_steps["encoder"]
             names.extend(enc.get_feature_names_out(cols).tolist())
     return names
 
@@ -208,15 +224,16 @@ def _feature_names_from_pipeline(pipeline: Pipeline) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def prepare_data() -> tuple[
-    pd.DataFrame, pd.DataFrame, pd.Series, pd.Series,
-    pd.DataFrame,  # full enriched df (for EDA / app)
-    list[str],     # numeric feature names
-    list[str],     # categorical feature names
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.Series,
+    pd.Series,
+    pd.DataFrame,
+    list[str],
+    list[str],
 ]:
     """
     Load → clean → engineer → split.
-
-    Returns train/test splits, full enriched dataframe, and feature name lists.
     """
     log.info("── Step 1/5  Loading raw data ──────────────────────────────")
     raw = load_raw_data()
@@ -228,7 +245,7 @@ def prepare_data() -> tuple[
     log.info("── Step 3/5  Feature engineering ───────────────────────────")
     enriched = engineer_features(cleaned)
 
-    # Save enriched dataset for the Streamlit app
+    # Save enriched dataset for downstream use
     ensure_output_dirs()
     enriched.to_csv(REPORTS_DIR / "cleaned_data.csv", index=False)
     log.info("Enriched dataset saved → outputs/reports/cleaned_data.csv")
@@ -249,27 +266,21 @@ def prepare_data() -> tuple[
 
 def train_all_models(
     X_train: pd.DataFrame,
-    X_test:  pd.DataFrame,
+    X_test: pd.DataFrame,
     y_train: pd.Series,
-    y_test:  pd.Series,
+    y_test: pd.Series,
     num_feats: list[str],
     cat_feats: list[str],
 ) -> tuple[pd.DataFrame, dict[str, Any], dict[str, np.ndarray]]:
     """
     Train every model in the registry, evaluate, cross-validate.
-
-    Returns
-    -------
-    metrics_df   : pd.DataFrame — one row per model, all metrics
-    fitted_models: dict[name → fitted Pipeline]
-    predictions  : dict[name → y_pred array on dollar scale]
     """
     registry = _get_model_registry()
-    all_metrics:   list[dict]          = []
+    all_metrics: list[dict] = []
     fitted_models: dict[str, Pipeline] = {}
-    predictions:   dict[str, np.ndarray] = {}
-    cv_results:    dict[str, dict]     = {}
-    lc_data:       dict[str, dict]     = {}
+    predictions: dict[str, np.ndarray] = {}
+    cv_results: dict[str, dict] = {}
+    lc_data: dict[str, dict] = {}
 
     log.info("── Step 5/5  Training %d models ─────────────────────────────", len(registry))
     total = len(registry)
@@ -277,20 +288,27 @@ def train_all_models(
     for idx, (name, estimator) in enumerate(registry.items(), start=1):
         log.info("[%d/%d] %s", idx, total, name)
 
-        pipeline = _build_pipeline(
-            clone(estimator), num_feats, cat_feats, name
-        )
+        pipeline = _build_pipeline(clone(estimator), num_feats, cat_feats, name)
 
         metrics, fitted, y_pred = evaluate_model(
-            pipeline, X_train, X_test, y_train, y_test,
+            pipeline,
+            X_train,
+            X_test,
+            y_train,
+            y_test,
             model_name=name,
             log_transformed=False,
         )
         all_metrics.append(metrics)
         fitted_models[name] = fitted
-        predictions[name]   = y_pred
+        predictions[name] = y_pred
 
-        # 5-fold cross-validation (fresh clone, no data leakage)
+        # Log CV-selected alpha for RidgeCV / LassoCV
+        reg = fitted.named_steps["regressor"]
+        if hasattr(reg, "alpha_"):
+            log.info("  → CV-selected alpha = %.6g", reg.alpha_)
+
+        # 5-fold cross-validation
         cv_pipeline = _build_pipeline(clone(estimator), num_feats, cat_feats, name)
         cv_results[name] = run_cross_validation(cv_pipeline, X_train, y_train)
         log.info(
@@ -299,11 +317,12 @@ def train_all_models(
             cv_results[name]["r2_std"],
         )
 
-        # Learning curve (only on key models to save time)
+        # Learning curve
         if name in {
             "Random Forest Regressor",
             "Gradient Boosting Regressor",
             "Ridge Regression",
+            "Lasso Regression",
             "Support Vector Regressor",
         }:
             lc_pipeline = _build_pipeline(clone(estimator), num_feats, cat_feats, name)
@@ -332,19 +351,15 @@ def save_best_model(
 ) -> Path:
     """
     Serialise the winning pipeline to models/best_model.pkl.
-
-    Also writes:
-      models/model_metadata.json  — model name, feature lists, target column
-      models/feature_info.json    — feature names needed by the Streamlit app
     """
     ensure_output_dirs()
 
     bundle = {
-        "model":    fitted_models[best_name],
+        "model": fitted_models[best_name],
         "metadata": {
-            "model_name":           best_name,
-            "target_column":        TARGET_COLUMN,
-            "numeric_features":     num_feats,
+            "model_name": best_name,
+            "target_column": TARGET_COLUMN,
+            "numeric_features": num_feats,
             "categorical_features": cat_feats,
         },
     }
@@ -353,16 +368,15 @@ def save_best_model(
     joblib.dump(bundle, model_path)
     log.info("Best model saved → %s", model_path)
 
-    # Feature info for the prediction/app layer
     feature_info = {
-        "best_model":           best_name,
-        "numeric_features":     num_feats,
+        "best_model": best_name,
+        "numeric_features": num_feats,
         "categorical_features": cat_feats,
-        "all_features":         num_feats + cat_feats,
-        "target_column":        TARGET_COLUMN,
+        "all_features": num_feats + cat_feats,
+        "target_column": TARGET_COLUMN,
     }
-    save_json(feature_info,          MODELS_DIR / "feature_info.json")
-    save_json(bundle["metadata"],    MODELS_DIR / "model_metadata.json")
+    save_json(feature_info, MODELS_DIR / "feature_info.json")
+    save_json(bundle["metadata"], MODELS_DIR / "model_metadata.json")
 
     return model_path
 
@@ -374,43 +388,49 @@ def save_best_model(
 def run_training_pipeline() -> dict[str, Any]:
     """
     Execute the complete training pipeline end-to-end and return a summary dict.
-
-    This is the single entry point called by  `python -m src.train`.
     """
     t_start = time.perf_counter()
     ensure_output_dirs()
 
-    # ── Data ─────────────────────────────────────────────────────────────────
     X_train, X_test, y_train, y_test, enriched, num_feats, cat_feats = prepare_data()
 
-    # ── Train ─────────────────────────────────────────────────────────────────
     metrics_df, fitted_models, predictions = train_all_models(
         X_train, X_test, y_train, y_test, num_feats, cat_feats
     )
 
-    # ── Select + report ───────────────────────────────────────────────────────
-    best_name = select_best_model(metrics_df)
+    _cv_path = METRICS_DIR / "cross_validation.json"
+    _cv_for_selection = json.loads(_cv_path.read_text()) if _cv_path.exists() else None
+    best_name = select_best_model(metrics_df, cv_data=_cv_for_selection)
     generate_comparison_report(metrics_df, best_name)
 
-    # ── Save model ────────────────────────────────────────────────────────────
     model_path = save_best_model(fitted_models, best_name, num_feats, cat_feats)
 
-    # ── Print leaderboard ─────────────────────────────────────────────────────
+    log.info("Generating EDA figures...")
+    generate_all_eda_figures(enriched)
+
+    log.info("Generating evaluation figures...")
+    lc_data_loaded: dict | None = None
+    lc_path = METRICS_DIR / "learning_curves.json"
+    if lc_path.exists():
+        with lc_path.open() as _f:
+            lc_data_loaded = json.load(_f)
+    generate_all_evaluation_figures(
+        metrics_df, fitted_models, predictions, y_test, lc_data_loaded
+    )
+
     elapsed = time.perf_counter() - t_start
     log.info("\n%s", "=" * 65)
     log.info("  TRAINING COMPLETE  (%.1f s total)", elapsed)
     log.info("=" * 65)
 
     display = (
-        metrics_df
-        .sort_values("rmse")
+        metrics_df.sort_values("rmse")
         .assign(
-            RMSE  = lambda d: d["rmse"].apply(lambda v: f"${v:,.0f}"),
-            MAE   = lambda d: d["mae"].apply(lambda v: f"${v:,.0f}"),
-            R2    = lambda d: d["r2"].apply(lambda v: f"{v:.4f}"),
-            Time  = lambda d: d["train_time_sec"].apply(lambda v: f"{v:.2f}s"),
-        )
-        [["model", "RMSE", "MAE", "R2", "Time"]]
+            RMSE=lambda d: d["rmse"].apply(lambda v: f"${v:,.0f}"),
+            MAE=lambda d: d["mae"].apply(lambda v: f"${v:,.0f}"),
+            R2=lambda d: d["r2"].apply(lambda v: f"{v:.4f}"),
+            Time=lambda d: d["train_time_sec"].apply(lambda v: f"{v:.2f}s"),
+        )[["model", "RMSE", "MAE", "R2", "Time"]]
         .rename(columns={"model": "Model"})
         .reset_index(drop=True)
     )
@@ -420,20 +440,16 @@ def run_training_pipeline() -> dict[str, Any]:
     log.info("=" * 65 + "\n")
 
     summary = {
-        "best_model":   best_name,
-        "model_path":   str(model_path),
-        "n_train":      int(len(X_train)),
-        "n_test":       int(len(X_test)),
-        "elapsed_sec":  round(elapsed, 2),
-        "metrics":      metrics_df.to_dict(orient="records"),
+        "best_model": best_name,
+        "model_path": str(model_path),
+        "n_train": int(len(X_train)),
+        "n_test": int(len(X_test)),
+        "elapsed_sec": round(elapsed, 2),
+        "metrics": metrics_df.to_dict(orient="records"),
     }
     save_json(summary, REPORTS_DIR / "training_summary.json")
     return summary
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
     run_training_pipeline()

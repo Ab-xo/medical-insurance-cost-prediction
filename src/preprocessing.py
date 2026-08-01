@@ -179,7 +179,7 @@ def handle_missing(df: pd.DataFrame) -> pd.DataFrame:
                      n_null, col, median_val)
 
     # Categorical imputation (mode)
-    cat_cols = cleaned.select_dtypes(include=["object", "category"]).columns.tolist()
+    cat_cols = cleaned.select_dtypes(include=["object", "string", "category"]).columns.tolist()
     for col in cat_cols:
         n_null = int(cleaned[col].isna().sum())
         if n_null:
@@ -221,7 +221,11 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # Step 5 — sklearn ColumnTransformer  (numeric + categorical pipelines)
 # ---------------------------------------------------------------------------
 
-def build_preprocessor(scale_numeric: bool = True) -> ColumnTransformer:
+def build_preprocessor(
+    scale_numeric: bool = True,
+    numeric_features: list[str] | None = None,
+    categorical_features: list[str] | None = None,
+) -> ColumnTransformer:
     """
     Build a sklearn ColumnTransformer for the insurance feature set.
 
@@ -231,21 +235,19 @@ def build_preprocessor(scale_numeric: bool = True) -> ColumnTransformer:
         True  → apply StandardScaler after median imputation.
                  Required for Linear Regression, Ridge, Lasso, SVR.
         False → skip scaling.
-                 Preferred for tree-based models (RF, GBR, DT) which are
-                 scale-invariant and can overfit with unnecessary transforms.
-
-    Pipeline structure
-    ------------------
-    numeric branch  : SimpleImputer(median)  [→ StandardScaler if scale_numeric]
-    categorical branch: SimpleImputer(most_frequent) → OneHotEncoder(drop='first')
-
-    OneHotEncoder uses drop='first' to avoid perfect multicollinearity in linear
-    models.  'handle_unknown=ignore' keeps inference safe for unseen categories.
+                 Preferred for tree-based models (RF, GBR, DT).
+    numeric_features : list of str, optional
+        Numeric feature names (defaults to NUMERIC_FEATURES).
+    categorical_features : list of str, optional
+        Categorical feature names (defaults to CATEGORICAL_FEATURES).
 
     Returns
     -------
     ColumnTransformer (unfitted)
     """
+    num_cols = numeric_features if numeric_features is not None else NUMERIC_FEATURES
+    cat_cols = categorical_features if categorical_features is not None else CATEGORICAL_FEATURES
+
     # Numeric pipeline
     numeric_steps: list[tuple] = [("imputer", SimpleImputer(strategy="median"))]
     if scale_numeric:
@@ -264,13 +266,14 @@ def build_preprocessor(scale_numeric: bool = True) -> ColumnTransformer:
 
     preprocessor = ColumnTransformer(
         transformers=[
-            ("num", numeric_pipeline,     NUMERIC_FEATURES),
-            ("cat", categorical_pipeline, CATEGORICAL_FEATURES),
+            ("num", numeric_pipeline,     num_cols),
+            ("cat", categorical_pipeline, cat_cols),
         ],
         remainder="drop",   # silently ignore any extra columns
         verbose_feature_names_out=False,
     )
     return preprocessor
+
 
 
 def get_feature_names_out(preprocessor: ColumnTransformer) -> list[str]:

@@ -196,32 +196,95 @@ def compute_learning_curve(
 # Best model selection  (composite ranking)
 # ---------------------------------------------------------------------------
 
-def select_best_model(metrics_df: pd.DataFrame) -> str:
+def select_best_model(
+    metrics_df: pd.DataFrame,
+    cv_data: dict | None = None,
+) -> str:
     """
-    Pick the best model via composite ranking across four metrics.
+    Pick the best model via composite ranking across metrics.
 
     Weights (tuned for insurance cost prediction):
-      RMSE  40 % — penalises large errors hard (important for high charges)
-      MAE   35 % — robust to the skewed distribution
-      R²    15 % — variance explained
-      Time  10 % — prefer fast models when accuracy is similar
+      RMSE  45 % — primary metric; penalises large errors on high charges
+      MAE   35 % — robust to the right-skewed charges distribution
+      R²    20 % — variance explained
 
-    Lower composite rank = better.
+    Train time is intentionally excluded from ranking — a 1-second difference
+    between trained pipelines is irrelevant for a batch model; accuracy matters.
+
+    Tie-breaking:
+      When two models score within 0.5 composite rank points of each other,
+      the one with the better CV R² mean wins. This ensures generalisation
+      beats lucky test-set performance.
+
+    Parameters
+    ----------
+    metrics_df : pd.DataFrame
+        Must contain columns: model, rmse, mae, r2
+    cv_data : dict, optional
+        Cross-validation results keyed by model name with key 'r2_mean'.
+        Used for tie-breaking. Loaded from outputs/metrics/cross_validation.json
+        if not provided.
     """
+    import json as _json
+
     df = metrics_df.copy()
-    df["rmse_rank"] = df["rmse"].rank()
-    df["mae_rank"]  = df["mae"].rank()
-    df["r2_rank"]   = df["r2"].rank(ascending=False)   # higher R² is better
-    df["time_rank"] = df["train_time_sec"].rank()
+
+    # ── primary composite score ───────────────────────────────────────────────
+    df["rmse_rank"] = df["rmse"].rank(ascending=True)       # lower = better
+    df["mae_rank"]  = df["mae"].rank(ascending=True)        # lower = better
+    df["r2_rank"]   = df["r2"].rank(ascending=False)        # higher = better
 
     df["composite"] = (
-        0.40 * df["rmse_rank"]
+        0.45 * df["rmse_rank"]
         + 0.35 * df["mae_rank"]
-        + 0.15 * df["r2_rank"]
-        + 0.10 * df["time_rank"]
+        + 0.20 * df["r2_rank"]
     )
-    best = df.loc[df["composite"].idxmin(), "model"]
-    log.info("select_best_model: winner = '%s'", best)
+
+    best_composite = df["composite"].min()
+    TIE_THRESHOLD  = 0.5  # models within this band are considered tied
+
+    candidates = df[df["composite"] <= best_composite + TIE_THRESHOLD].copy()
+
+    # ── tie-break via CV R² ───────────────────────────────────────────────────
+    if len(candidates) > 1 and cv_data is None:
+        # Try to load from disk
+        from src.utils import METRICS_DIR
+        cv_path = METRICS_DIR / "cross_validation.json"
+        if cv_path.exists():
+            cv_data = _json.loads(cv_path.read_text())
+
+    if len(candidates) > 1 and cv_data:
+        candidates = candidates.copy()
+        candidates["cv_r2"] = candidates["model"].map(
+            lambda m: cv_data.get(m, {}).get("r2_mean", 0.0)
+        )
+        best_idx = candidates["cv_r2"].idxmax()
+        best = candidates.loc[best_idx, "model"]
+        log.info(
+            "select_best_model: tie between %s — broken by CV R²; winner = '%s'",
+            candidates["model"].tolist(), best,
+        )
+    else:
+        best = df.loc[df["composite"].idxmin(), "model"]
+        log.info("select_best_model: winner = '%s'", best)
+
+    # ── log full ranking ──────────────────────────────────────────────────────
+    ranking = (
+        df.sort_values("composite")[["model", "rmse", "mae", "r2", "composite"]]
+        .reset_index(drop=True)
+    )
+    log.info(
+        "Model ranking:\n%s",
+        ranking.to_string(
+            index=False,
+            formatters={
+                "rmse":      lambda v: f"${v:>9,.0f}",
+                "mae":       lambda v: f"${v:>8,.0f}",
+                "r2":        lambda v: f"{v:.4f}",
+                "composite": lambda v: f"{v:.2f}",
+            },
+        ),
+    )
     return str(best)
 
 
