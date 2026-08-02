@@ -87,16 +87,19 @@ export function ChartCard({
               className="overflow-hidden"
             >
               <CardContent
-                className="p-2 bg-white/[0.03] flex items-center justify-center cursor-zoom-in"
+                className="p-0 bg-white/[0.03] cursor-zoom-in"
                 onClick={openModal}
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={url}
-                  alt={label}
-                  className="w-full max-h-72 object-contain hover:scale-[1.02] transition-transform duration-300"
-                  loading="lazy"
-                />
+                {/* Fixed-height container so all cards are equal height in the grid */}
+                <div className="h-56 flex items-center justify-center p-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={url}
+                    alt={label}
+                    className="h-full w-full object-contain hover:scale-[1.02] transition-transform duration-300"
+                    loading="lazy"
+                  />
+                </div>
               </CardContent>
             </motion.div>
           )}
