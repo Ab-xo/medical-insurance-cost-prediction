@@ -321,39 +321,50 @@ def plot_sex_distribution(df: pd.DataFrame) -> Path:
 
 
 def plot_correlation_heatmap(df: pd.DataFrame) -> Path:
-    """Correlation heatmap with annotations sized for readability."""
+    """Correlation heatmap with clear annotations on all cells."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     corr = df[num_cols].corr()
     n    = len(num_cols)
 
-    # Scale figure to number of features — minimum 14×11
-    fig_w = max(14, n * 1.5)
-    fig_h = max(11, n * 1.2)
+    fig_w = max(16, n * 1.6)
+    fig_h = max(13, n * 1.3)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    mask = np.triu(np.ones_like(corr, dtype=bool))
+    # Use a diverging palette with a lighter midpoint so annotation
+    # text is readable across the full -1 → +1 range
+    cmap = sns.diverging_palette(220, 10, as_cmap=True)
+
     sns.heatmap(
-        corr, mask=mask,
+        corr,
         annot=True, fmt=".2f",
-        annot_kws={"size": 11, "weight": "bold", "color": TEXT_COL},
-        cmap="coolwarm", center=0,
-        linewidths=1.0, linecolor=BG_DARK,
+        annot_kws={"size": 12, "weight": "bold", "color": "#ffffff"},
+        cmap=cmap, center=0,
+        linewidths=0.4,            # thin separator lines so they don't eat the cells
+        linecolor="#2a2d3a",
         square=True, ax=ax,
-        cbar_kws={"shrink": 0.75, "pad": 0.02},
+        cbar_kws={"shrink": 0.72, "pad": 0.03},
         vmin=-1, vmax=1,
     )
-    # Style colorbar
+
+    # Colorbar styling
     cbar = ax.collections[0].colorbar
     cbar.ax.tick_params(labelcolor=TEXT_COL, labelsize=10)
     cbar.ax.yaxis.label.set_color(TEXT_COL)
+    cbar.set_ticks([-1, -0.5, 0, 0.5, 1])
 
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=40, ha="right",
-                       fontsize=10, color=TEXT_COL)
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0,
-                       fontsize=10, color=TEXT_COL)
+    ax.set_xticklabels(
+        ax.get_xticklabels(),
+        rotation=40, ha="right", fontsize=11, color=TEXT_COL
+    )
+    ax.set_yticklabels(
+        ax.get_yticklabels(),
+        rotation=0, fontsize=11, color=TEXT_COL
+    )
+
     _title(ax, "Correlation Heatmap — Numeric Features")
     fig.patch.set_facecolor(BG_DARK)
     ax.set_facecolor(BG_AXES)
+    fig.tight_layout(pad=1.5)
     return _save(fig, "correlation_heatmap")
 
 
