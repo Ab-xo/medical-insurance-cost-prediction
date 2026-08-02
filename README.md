@@ -118,9 +118,12 @@ cd ..
 
 ## Running the Project
 
-All three steps below can run simultaneously in separate terminals.
+Open **3 separate terminals** from the project root. Run them in this order.
 
 ### Step 1 — Train the models
+
+> ⚠️ **Required first time.** Generates `models/best_model.pkl` and all 48 plots.
+> Skip if `models/best_model.pkl` already exists.
 
 ```powershell
 # Windows
@@ -133,16 +136,16 @@ python -m src.train
 PYTHONPATH=. python -m src.train
 ```
 
-This takes ~2 minutes and produces:
+Takes ~2 minutes and produces:
 
 - `models/best_model.pkl` — serialised winning pipeline
 - `outputs/figures/` — 12 EDA + 36 evaluation plots
 - `outputs/metrics/` — comparison CSV, cross-validation JSON
 - `outputs/reports/` — markdown comparison report
 
-> Skip this step if `models/best_model.pkl` already exists.
-
 ### Step 2 — Start the FastAPI backend
+
+> ⚠️ **Must be running before you open the dashboard.** The Next.js pages fetch all data from this API.
 
 ```bash
 uvicorn main:app --reload --port 8000
@@ -158,6 +161,19 @@ npm run dev
 ```
 
 Open `http://localhost:3000`
+
+---
+
+## Pulling Latest Updates (for teammates)
+
+If someone else has already cloned the repo and you pushed new changes:
+
+```bash
+git pull origin main
+pip install -r requirements.txt   # pick up any new Python packages
+cd frontend && npm ci && cd ..    # pick up any new Node packages
+python -m src.train               # regenerate model + plots with latest code
+```
 
 ---
 
