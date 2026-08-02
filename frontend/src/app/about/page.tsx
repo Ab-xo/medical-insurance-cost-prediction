@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Target, Lightbulb, Wrench, Database, Layers,
   Terminal, FolderOpen, ExternalLink, Flame, Scale,
-  TrendingUp, CheckCircle, BarChart2, Users2, Github,
+  TrendingUp, CheckCircle, BarChart2, Users2,
 } from "lucide-react";
 
 export const metadata: Metadata = {
@@ -415,7 +415,7 @@ pytest tests/ -v`}
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
                   >
-                    <Github size={12} /> GitHub
+                    <ExternalLink size={12} /> GitHub
                   </a>
                 )}
               </div>
