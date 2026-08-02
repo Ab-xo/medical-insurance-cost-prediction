@@ -1,27 +1,17 @@
 import type { Metadata } from "next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Target, Lightbulb, Wrench, Database, Layers,
+  Terminal, FolderOpen, ExternalLink, Flame, Scale,
+  TrendingUp, CheckCircle, BarChart2, Users2, Github,
+} from "lucide-react";
 
 export const metadata: Metadata = {
   title: "About",
   description:
     "Project overview, tech stack, dataset details, and quick-start commands for the MedPredict.ai insurance cost prediction pipeline.",
 };
-import { Badge } from "@/components/ui/badge";
-import {
-  Target,
-  Lightbulb,
-  Wrench,
-  Database,
-  Layers,
-  Terminal,
-  FolderOpen,
-  ExternalLink,
-  Flame,
-  Scale,
-  TrendingUp,
-  CheckCircle,
-  BarChart2,
-} from "lucide-react";
 
 // ─── Data ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +69,32 @@ const KEY_FILES: { path: string; role: string }[] = [
   { path: "src/visualization.py",       role: "EDA + evaluation plots" },
   { path: "main.py",                    role: "FastAPI JSON API server" },
   { path: "frontend/src/",             role: "This Next.js dashboard" },
+];
+
+const TEAM: {
+  name: string;
+  role: string;
+  contribution: string;
+  github?: string;
+  initials: string;
+  color: string;
+}[] = [
+  {
+    name: "Abdullah",
+    role: "ML Engineer & Full-Stack Developer",
+    contribution: "ML pipeline, FastAPI backend, Next.js dashboard, feature engineering, model evaluation",
+    github: "https://github.com/Ab-xo",
+    initials: "AB",
+    color: "from-primary/30 to-primary/10",
+  },
+  // Add more team members below — copy the block above
+  // {
+  //   name: "Team Member",
+  //   role: "Role",
+  //   contribution: "What they worked on",
+  //   initials: "TM",
+  //   color: "from-blue-500/30 to-blue-500/10",
+  // },
 ];
 
 const FINDINGS: { icon: React.ReactNode; text: React.ReactNode }[] = [
@@ -360,6 +376,56 @@ pytest tests/ -v`}
           </Card>
         </div>
       </div>
+
+      {/* ── Team ─────────────────────────────────────────────────── */}
+      <Card className="bg-card/40 backdrop-blur-md border-primary/20">
+        <CardHeader className="pb-3">
+          <CardTitle>
+            <SectionHeader icon={<Users2 size={15} />} title="Team" />
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {TEAM.map((member) => (
+              <div
+                key={member.name}
+                className={`bg-gradient-to-br ${member.color} border border-primary/20 rounded-xl p-4 space-y-3`}
+              >
+                {/* Avatar + name */}
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-primary/20 border border-primary/30 flex items-center justify-center font-bold text-sm text-primary shrink-0">
+                    {member.initials}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-sm">{member.name}</p>
+                    <p className="text-xs text-primary">{member.role}</p>
+                  </div>
+                </div>
+
+                {/* Contribution */}
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {member.contribution}
+                </p>
+
+                {/* GitHub link */}
+                {member.github && (
+                  <a
+                    href={member.github}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+                  >
+                    <Github size={12} /> GitHub
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-4 text-center">
+            Built as part of a machine learning course project.
+          </p>
+        </CardContent>
+      </Card>
     </div>
   );
 }
