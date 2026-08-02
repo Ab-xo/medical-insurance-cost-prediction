@@ -321,50 +321,57 @@ def plot_sex_distribution(df: pd.DataFrame) -> Path:
 
 
 def plot_correlation_heatmap(df: pd.DataFrame) -> Path:
-    """Correlation heatmap with clear annotations on all cells."""
+    """Standard correlation heatmap — white cell background, auto text color."""
     num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    corr = df[num_cols].corr()
+    corr = df[num_cols].corr().round(2)
     n    = len(num_cols)
 
-    fig_w = max(16, n * 1.6)
-    fig_h = max(13, n * 1.3)
+    fig_w = max(16, n * 1.4)
+    fig_h = max(13, n * 1.2)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
 
-    # Use a diverging palette with a lighter midpoint so annotation
-    # text is readable across the full -1 → +1 range
-    cmap = sns.diverging_palette(220, 10, as_cmap=True)
+    # White figure and axes background so cell colors are true to scale
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
 
-    sns.heatmap(
-        corr,
-        annot=True, fmt=".2f",
-        annot_kws={"size": 12, "weight": "bold", "color": "#ffffff"},
-        cmap=cmap, center=0,
-        linewidths=0.4,            # thin separator lines so they don't eat the cells
-        linecolor="#2a2d3a",
-        square=True, ax=ax,
-        cbar_kws={"shrink": 0.72, "pad": 0.03},
-        vmin=-1, vmax=1,
-    )
+    # Draw heatmap with no grid lines — lines at any width cause overlap
+    im = ax.imshow(corr.values, cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
 
-    # Colorbar styling
-    cbar = ax.collections[0].colorbar
-    cbar.ax.tick_params(labelcolor=TEXT_COL, labelsize=10)
-    cbar.ax.yaxis.label.set_color(TEXT_COL)
-    cbar.set_ticks([-1, -0.5, 0, 0.5, 1])
+    # Axis ticks
+    ax.set_xticks(np.arange(n))
+    ax.set_yticks(np.arange(n))
+    ax.set_xticklabels(corr.columns, rotation=45, ha="right",
+                       fontsize=11, color="#1e1e2e")
+    ax.set_yticklabels(corr.index, rotation=0,
+                       fontsize=11, color="#1e1e2e")
+    ax.tick_params(length=0)
 
-    ax.set_xticklabels(
-        ax.get_xticklabels(),
-        rotation=40, ha="right", fontsize=11, color=TEXT_COL
-    )
-    ax.set_yticklabels(
-        ax.get_yticklabels(),
-        rotation=0, fontsize=11, color=TEXT_COL
-    )
+    # Annotate each cell — dark text on light cells, white on dark cells
+    for i in range(n):
+        for j in range(n):
+            val = corr.values[i, j]
+            # Pick text color based on cell brightness
+            text_color = "white" if abs(val) > 0.55 else "#1e1e2e"
+            ax.text(j, i, f"{val:.2f}",
+                    ha="center", va="center",
+                    fontsize=10, fontweight="bold", color=text_color)
 
-    _title(ax, "Correlation Heatmap — Numeric Features")
-    fig.patch.set_facecolor(BG_DARK)
-    ax.set_facecolor(BG_AXES)
-    fig.tight_layout(pad=1.5)
+    # Colorbar
+    cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.03)
+    cbar.set_ticks([-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1])
+    cbar.ax.tick_params(labelsize=10, colors="#1e1e2e")
+    cbar.ax.yaxis.label.set_color("#1e1e2e")
+    cbar.outline.set_edgecolor("#cccccc")
+
+    ax.set_title("Correlation Heatmap — Numeric Features",
+                 fontsize=15, fontweight="bold", color="#1e1e2e", pad=14)
+
+    # Light border around the whole grid
+    for spine in ax.spines.values():
+        spine.set_edgecolor("#cccccc")
+        spine.set_linewidth(0.8)
+
+    fig.tight_layout(pad=2.0)
     return _save(fig, "correlation_heatmap")
 
 
