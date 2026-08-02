@@ -110,7 +110,7 @@ pip install -r requirements.txt
 
 ```bash
 cd frontend
-npm install
+npm ci        # faster than npm install — reads package-lock.json directly
 cd ..
 ```
 
