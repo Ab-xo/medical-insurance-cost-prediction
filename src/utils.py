@@ -1,9 +1,4 @@
-"""
-Utility functions for paths, I/O, logging, and dataset inspection.
-
-This is the foundation module — every other src/ file imports from here.
-Nothing in utils.py imports from other src/ modules (no circular deps).
-"""
+"""Foundation module — paths, constants, logging, and I/O helpers."""
 
 from __future__ import annotations
 
@@ -15,11 +10,9 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-# ---------------------------------------------------------------------------
-# Project-level paths  (resolved from this file's location → project root)
-# ---------------------------------------------------------------------------
+# ── Paths ─────────────────────────────────────────────────────────────────────
 
-ROOT_DIR    = Path(__file__).resolve().parents[1]   # medical-insurance-cost-prediction/
+ROOT_DIR    = Path(__file__).resolve().parents[1]
 DATA_DIR    = ROOT_DIR / "data"
 MODELS_DIR  = ROOT_DIR / "models"
 OUTPUTS_DIR = ROOT_DIR / "outputs"
@@ -31,43 +24,31 @@ REPORTS_DIR = OUTPUTS_DIR / "reports"
 
 RAW_DATA_PATH = DATA_DIR / "insurance.csv"
 
-# ---------------------------------------------------------------------------
-# Dataset-level constants
-# ---------------------------------------------------------------------------
+# ── Constants ─────────────────────────────────────────────────────────────────
 
 TARGET_COLUMN = "charges"
-RANDOM_STATE  = 42          # fixed seed — keeps results reproducible
+RANDOM_STATE  = 42
 
-# Feature groups (matches the insurance.csv schema)
 NUMERIC_FEATURES     = ["age", "bmi", "children"]
 CATEGORICAL_FEATURES = ["sex", "smoker", "region"]
 ALL_FEATURES         = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
-# Domain knowledge
-SMOKER_SURCHARGE_FACTOR = 3.0   # smokers pay ~3× more on average
-BMI_OBESE_THRESHOLD     = 30.0  # BMI ≥ 30 is clinically obese
+SMOKER_SURCHARGE_FACTOR = 3.0
+BMI_OBESE_THRESHOLD     = 30.0
 
 
-# ---------------------------------------------------------------------------
-# Directory helpers
-# ---------------------------------------------------------------------------
+# ── Directory setup ───────────────────────────────────────────────────────────
 
 def ensure_output_dirs() -> None:
-    """Create every output directory if it does not already exist."""
-    for directory in (FIGURES_DIR, EDA_DIR, EVAL_DIR, METRICS_DIR, REPORTS_DIR, MODELS_DIR):
-        directory.mkdir(parents=True, exist_ok=True)
+    """Create all output directories if they don't exist."""
+    for d in (FIGURES_DIR, EDA_DIR, EVAL_DIR, METRICS_DIR, REPORTS_DIR, MODELS_DIR):
+        d.mkdir(parents=True, exist_ok=True)
 
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
+# ── Logging ───────────────────────────────────────────────────────────────────
 
 def get_logger(name: str) -> logging.Logger:
-    """
-    Return a named logger with a console handler.
-
-    Safe to call multiple times — handler is only added once.
-    """
+    """Return a named logger. Safe to call multiple times."""
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = logging.StreamHandler()
@@ -80,82 +61,52 @@ def get_logger(name: str) -> logging.Logger:
     return logger
 
 
-# ---------------------------------------------------------------------------
-# I/O helpers
-# ---------------------------------------------------------------------------
+# ── I/O ───────────────────────────────────────────────────────────────────────
 
 def load_raw_data(path: Path = RAW_DATA_PATH) -> pd.DataFrame:
-    """
-    Load the raw insurance CSV.
-
-    Raises FileNotFoundError with a helpful message if the file is missing.
-    """
+    """Load insurance.csv. Raises FileNotFoundError with a helpful message."""
     if not path.exists():
         raise FileNotFoundError(
             f"Dataset not found at {path}.\n"
             "Download it from Kaggle and place it at data/insurance.csv"
         )
-    df = pd.read_csv(path)
-    return df
+    return pd.read_csv(path)
 
 
 def save_json(data: dict[str, Any], path: Path) -> None:
-    """Serialise *data* as indented JSON and write to *path*."""
+    """Write data as indented JSON."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=2, default=str)
 
 
 def save_markdown(content: str, path: Path) -> None:
-    """Write a markdown string to *path*, creating parent dirs as needed."""
+    """Write a markdown string to path."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
 
-# ---------------------------------------------------------------------------
-# Dataset inspection  (raw overview before ANY preprocessing)
-# ---------------------------------------------------------------------------
+# ── Dataset inspection ────────────────────────────────────────────────────────
 
 def _section(title: str, width: int = 60) -> str:
-    """Return a formatted section header string."""
     return f"\n{'=' * width}\n  {title}\n{'=' * width}"
 
 
 def inspect_dataframe(df: pd.DataFrame, logger: logging.Logger | None = None) -> dict[str, Any]:
-    """
-    Print and return a structured overview of *df* with no modifications.
-
-    Covers:
-      - Shape & column list
-      - Data types
-      - Missing values (count + %)
-      - Duplicate rows
-      - Numeric descriptive statistics
-      - Categorical value counts
-      - Target variable (charges) summary
-      - Class balance of key categorical features
-
-    Returns
-    -------
-    dict
-        Same information as a nested dict (useful for saving to JSON).
-    """
+    """Print a structured overview of df and return the same data as a dict."""
     log = logger or get_logger("inspect")
     summary: dict[str, Any] = {}
 
-    # ---- Shape ----
     log.info(_section("SHAPE"))
     log.info("Rows: %d  |  Columns: %d", *df.shape)
     summary["shape"] = {"rows": int(df.shape[0]), "columns": int(df.shape[1])}
 
-    # ---- Columns & dtypes ----
     log.info(_section("COLUMNS & DTYPES"))
     dtype_map = {col: str(dt) for col, dt in df.dtypes.items()}
     for col, dt in dtype_map.items():
         log.info("  %-12s  %s", col, dt)
     summary["dtypes"] = dtype_map
 
-    # ---- Missing values ----
     log.info(_section("MISSING VALUES"))
     missing_counts = df.isna().sum()
     missing_pct    = (df.isna().mean() * 100).round(2)
@@ -167,20 +118,17 @@ def inspect_dataframe(df: pd.DataFrame, logger: logging.Logger | None = None) ->
     summary["missing_values"] = missing_counts.astype(int).to_dict()
     summary["missing_pct"]    = missing_pct.to_dict()
 
-    # ---- Duplicates ----
     log.info(_section("DUPLICATE ROWS"))
     n_dupes = int(df.duplicated().sum())
-    log.info("  %d duplicate row(s)  (%.2f%% of dataset)", n_dupes, n_dupes / len(df) * 100)
+    log.info("  %d duplicate row(s)  (%.2f%%)", n_dupes, n_dupes / len(df) * 100)
     summary["duplicate_rows"] = n_dupes
 
-    # ---- Numeric descriptive stats ----
-    log.info(_section("NUMERIC FEATURE STATISTICS"))
+    log.info(_section("NUMERIC STATISTICS"))
     num_df = df.select_dtypes(include=[np.number])
     log.info("\n%s", num_df.describe().T.to_string())
     summary["numeric_stats"] = num_df.describe().T.to_dict()
 
-    # ---- Categorical value counts ----
-    log.info(_section("CATEGORICAL FEATURE VALUE COUNTS"))
+    log.info(_section("CATEGORICAL VALUE COUNTS"))
     cat_cols = df.select_dtypes(include=["object", "category"]).columns.tolist()
     summary["categorical_counts"] = {}
     for col in cat_cols:
@@ -188,9 +136,8 @@ def inspect_dataframe(df: pd.DataFrame, logger: logging.Logger | None = None) ->
         log.info("\n  %s:\n%s", col, vc.to_string())
         summary["categorical_counts"][col] = vc.astype(int).to_dict()
 
-    # ---- Target variable deep-dive ----
     if TARGET_COLUMN in df.columns:
-        log.info(_section(f"TARGET VARIABLE: {TARGET_COLUMN}"))
+        log.info(_section(f"TARGET: {TARGET_COLUMN}"))
         tgt = df[TARGET_COLUMN]
         stats = {
             "min":    float(tgt.min()),
@@ -204,58 +151,41 @@ def inspect_dataframe(df: pd.DataFrame, logger: logging.Logger | None = None) ->
             log.info("  %-8s  %.4f", k, v)
         summary["target_stats"] = stats
 
-        # Quartile breakdown
         q1, q3 = float(tgt.quantile(0.25)), float(tgt.quantile(0.75))
-        log.info("  Q1 = %.2f  |  Q3 = %.2f  |  IQR = %.2f", q1, q3, q3 - q1)
-        summary["target_quartiles"] = {"q1": q1, "q3": q3, "iqr": q3 - q1}
-
-        # Outlier estimate via 1.5×IQR rule
         iqr = q3 - q1
+        log.info("  Q1=%.2f  Q3=%.2f  IQR=%.2f", q1, q3, iqr)
+        summary["target_quartiles"] = {"q1": q1, "q3": q3, "iqr": iqr}
+
         n_outliers = int(((tgt < q1 - 1.5 * iqr) | (tgt > q3 + 1.5 * iqr)).sum())
-        log.info("  Potential outliers (1.5×IQR rule): %d  (%.1f%%)",
-                 n_outliers, n_outliers / len(tgt) * 100)
+        log.info("  Outliers (1.5×IQR): %d  (%.1f%%)", n_outliers, n_outliers / len(tgt) * 100)
         summary["target_outliers_iqr"] = n_outliers
 
-    # ---- Smoker vs non-smoker charges preview ----
     if "smoker" in df.columns and TARGET_COLUMN in df.columns:
-        log.info(_section("SMOKER vs NON-SMOKER CHARGES"))
+        log.info(_section("SMOKER vs NON-SMOKER"))
         grp = df.groupby("smoker")[TARGET_COLUMN].agg(["mean", "median", "count"])
         log.info("\n%s", grp.to_string())
         summary["smoker_charges"] = grp.to_dict()
 
-    log.info("\n" + "=" * 60)
-    log.info("  Inspection complete.")
-    log.info("=" * 60 + "\n")
-
+    log.info("\n" + "=" * 60 + "\n  Inspection complete.\n" + "=" * 60 + "\n")
     return summary
 
 
 def generate_data_understanding_report(df: pd.DataFrame) -> str:
-    """
-    Run inspect_dataframe and persist results as both JSON and Markdown.
-
-    Writes to:
-      outputs/reports/data_understanding.json
-      outputs/reports/data_understanding.md
-
-    Returns the markdown string.
-    """
+    """Run inspection and save results as JSON + Markdown to outputs/reports/."""
     ensure_output_dirs()
     log = get_logger("data_understanding")
     summary = inspect_dataframe(df, logger=log)
 
-    # Persist JSON
     save_json(summary, REPORTS_DIR / "data_understanding.json")
 
-    # Build Markdown report
     lines = [
         "# Data Understanding Report — Medical Insurance Costs",
         "",
-        "## Dataset Shape",
+        "## Shape",
         f"- **Rows:** {summary['shape']['rows']:,}",
         f"- **Columns:** {summary['shape']['columns']}",
         "",
-        "## Columns & Data Types",
+        "## Columns & Types",
         "",
         "| Column | Type |",
         "|--------|------|",
@@ -263,34 +193,21 @@ def generate_data_understanding_report(df: pd.DataFrame) -> str:
     for col, dt in summary["dtypes"].items():
         lines.append(f"| `{col}` | `{dt}` |")
 
-    lines += [
-        "",
-        "## Missing Values",
-        "",
-    ]
-    total_missing = sum(summary["missing_values"].values())
-    if total_missing == 0:
-        lines.append("No missing values found in the dataset.")
+    lines += ["", "## Missing Values", ""]
+    if sum(summary["missing_values"].values()) == 0:
+        lines.append("No missing values found.")
     else:
         lines += ["| Column | Missing | % |", "|--------|---------|---|"]
         for col, cnt in summary["missing_values"].items():
-            pct = summary["missing_pct"][col]
-            lines.append(f"| `{col}` | {cnt} | {pct}% |")
+            lines.append(f"| `{col}` | {cnt} | {summary['missing_pct'][col]}% |")
 
-    lines += [
-        "",
-        f"## Duplicate Rows",
-        f"- **Count:** {summary['duplicate_rows']}",
-        "",
-        "## Target Variable (`charges`)",
-        "",
-    ]
+    lines += ["", f"## Duplicates", f"- **Count:** {summary['duplicate_rows']}", "", "## Target (`charges`)", ""]
+
     if "target_stats" in summary:
         ts = summary["target_stats"]
         tq = summary["target_quartiles"]
         lines += [
-            f"| Stat | Value |",
-            f"|------|-------|",
+            "| Stat | Value |", "|------|-------|",
             f"| Min | ${ts['min']:,.2f} |",
             f"| Max | ${ts['max']:,.2f} |",
             f"| Mean | ${ts['mean']:,.2f} |",
@@ -304,22 +221,14 @@ def generate_data_understanding_report(df: pd.DataFrame) -> str:
         ]
 
     if "smoker_charges" in summary:
-        lines += [
-            "",
-            "## Smoker vs Non-Smoker Charges",
-            "",
-            "| Smoker | Mean | Median | Count |",
-            "|--------|------|--------|-------|",
-        ]
+        lines += ["", "## Smoker vs Non-Smoker", "", "| Smoker | Mean | Median | Count |", "|--------|------|--------|-------|"]
         means   = summary["smoker_charges"]["mean"]
         medians = summary["smoker_charges"]["median"]
         counts  = summary["smoker_charges"]["count"]
         for key in means:
-            lines.append(
-                f"| {key} | ${means[key]:,.2f} | ${medians[key]:,.2f} | {int(counts[key])} |"
-            )
+            lines.append(f"| {key} | ${means[key]:,.2f} | ${medians[key]:,.2f} | {int(counts[key])} |")
 
-    lines += ["", "---", "_Generated automatically by `src/utils.py`_"]
+    lines += ["", "---", "_Generated by `src/utils.py`_"]
     content = "\n".join(lines)
     save_markdown(content, REPORTS_DIR / "data_understanding.md")
     log.info("Reports saved → outputs/reports/data_understanding.{json,md}")

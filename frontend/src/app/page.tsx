@@ -18,6 +18,8 @@ import {
   AlertTriangle,
   Trophy,
   CheckCircle2,
+  Hash,
+  Tag,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -26,6 +28,18 @@ const container = {
   show: { opacity: 1, transition: { staggerChildren: 0.08 } },
 };
 const item = { hidden: { opacity: 0, y: 18 }, show: { opacity: 1, y: 0 } };
+
+const NUMERIC_FEATURES = [
+  { name: "age",      range: "18 – 64",  desc: "Age of primary beneficiary",        unit: "years" },
+  { name: "bmi",      range: "15.9 – 53.1", desc: "Body Mass Index",               unit: "kg/m²" },
+  { name: "children", range: "0 – 5",    desc: "Number of dependants on policy",    unit: "count" },
+];
+
+const CATEGORICAL_FEATURES_RAW = [
+  { name: "sex",    values: ["male", "female"],                                          desc: "Biological sex of beneficiary" },
+  { name: "smoker", values: ["yes", "no"],                                               desc: "Current smoker status" },
+  { name: "region", values: ["northeast", "northwest", "southeast", "southwest"],        desc: "US residential region" },
+];
 
 const ENGINEERED_FEATURES = [
   { name: "age_group",    desc: "young / middle_age / senior" },
@@ -387,6 +401,65 @@ export default function HomePage() {
           </Card>
         </motion.div>
       )}
+
+      {/* ── Dataset Features ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.8 }}
+        className="grid gap-6 md:grid-cols-2"
+      >
+        {/* Numeric */}
+        <Card className="bg-card/40 backdrop-blur-md border-primary/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Hash size={16} className="text-primary" /> Numeric Features
+            </CardTitle>
+            <CardDescription>Continuous inputs fed into the model</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {NUMERIC_FEATURES.map((f) => (
+              <div key={f.name} className="flex items-start justify-between gap-3 py-2 border-b border-border/30 last:border-0">
+                <div>
+                  <code className="text-xs font-mono text-primary font-semibold">{f.name}</code>
+                  <p className="text-xs text-muted-foreground mt-0.5">{f.desc}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-xs font-mono bg-secondary/40 px-2 py-0.5 rounded">{f.range}</span>
+                  <p className="text-[10px] text-muted-foreground mt-1">{f.unit}</p>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* Categorical */}
+        <Card className="bg-card/40 backdrop-blur-md border-primary/20">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Tag size={16} className="text-primary" /> Categorical Features
+            </CardTitle>
+            <CardDescription>Encoded with OneHotEncoder during training</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {CATEGORICAL_FEATURES_RAW.map((f) => (
+              <div key={f.name} className="py-2 border-b border-border/30 last:border-0">
+                <div className="flex items-center justify-between mb-1.5">
+                  <code className="text-xs font-mono text-primary font-semibold">{f.name}</code>
+                  <span className="text-[10px] text-muted-foreground">{f.desc}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {f.values.map((v) => (
+                    <Badge key={v} variant="secondary" className="text-[10px] px-2 py-0 font-mono">
+                      {v}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </motion.div>
 
       {/* ── Engineered features ── */}
       <motion.div
