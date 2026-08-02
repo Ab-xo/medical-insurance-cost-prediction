@@ -341,9 +341,9 @@ def plot_correlation_heatmap(df: pd.DataFrame) -> Path:
     ax.set_xticks(np.arange(n))
     ax.set_yticks(np.arange(n))
     ax.set_xticklabels(corr.columns, rotation=45, ha="right",
-                       fontsize=11, color="#1e1e2e")
+                       fontsize=11, color="white")
     ax.set_yticklabels(corr.index, rotation=0,
-                       fontsize=11, color="#1e1e2e")
+                       fontsize=11, color="white")
     ax.tick_params(length=0)
 
     # Annotate each cell — dark text on light cells, white on dark cells
@@ -359,12 +359,12 @@ def plot_correlation_heatmap(df: pd.DataFrame) -> Path:
     # Colorbar
     cbar = fig.colorbar(im, ax=ax, fraction=0.03, pad=0.03)
     cbar.set_ticks([-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1])
-    cbar.ax.tick_params(labelsize=10, colors="#1e1e2e")
-    cbar.ax.yaxis.label.set_color("#1e1e2e")
+    cbar.ax.tick_params(labelsize=10, colors="white")
+    cbar.ax.yaxis.label.set_color("white")
     cbar.outline.set_edgecolor("#cccccc")
 
     ax.set_title("Correlation Heatmap — Numeric Features",
-                 fontsize=15, fontweight="bold", color="#1e1e2e", pad=14)
+                 fontsize=15, fontweight="bold", color="white", pad=14)
 
     # Light border around the whole grid
     for spine in ax.spines.values():
