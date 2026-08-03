@@ -32,7 +32,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
     >
-      <body className="min-h-full flex bg-background text-foreground">
+      <body className="min-h-full flex bg-background text-foreground" suppressHydrationWarning>
         <Sidebar />
         {/* offset for desktop sidebar; top offset for mobile bar */}
         <main className="flex-1 md:ml-64 mt-14 md:mt-0 p-5 md:p-8 lg:p-10 min-h-screen overflow-x-hidden">
