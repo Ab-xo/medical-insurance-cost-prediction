@@ -14,8 +14,11 @@ import {
   Menu,
   X,
   HeartPulse,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/components/ThemeProvider";
 
 const navItems = [
   { href: "/",        label: "Home",             icon: Home,       desc: "Overview & KPIs" },
@@ -28,6 +31,7 @@ const navItems = [
 
 function SidebarContent({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname();
+  const { theme, toggle } = useTheme();
 
   return (
     <div className="flex flex-col h-full">
@@ -99,7 +103,27 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
       </nav>
 
       {/* Footer status */}
-      <div className="mt-6 px-1">
+      <div className="mt-6 px-1 space-y-3">
+        {/* Theme toggle */}
+        <button
+          onClick={toggle}
+          className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-secondary/30 border border-border/50 text-sm text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-all"
+        >
+          <span className="flex items-center gap-2 font-medium">
+            {theme === "dark" ? <Moon size={14} className="text-primary" /> : <Sun size={14} className="text-yellow-400" />}
+            {theme === "dark" ? "Dark Mode" : "Light Mode"}
+          </span>
+          <div className={cn(
+            "w-8 h-4 rounded-full transition-colors relative",
+            theme === "dark" ? "bg-primary/60" : "bg-yellow-400/60"
+          )}>
+            <div className={cn(
+              "absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform",
+              theme === "dark" ? "translate-x-4" : "translate-x-0.5"
+            )} />
+          </div>
+        </button>
+
         <div className="bg-secondary/30 rounded-xl p-3 text-xs text-muted-foreground border border-border/50 space-y-2">
           <p className="font-semibold text-foreground text-sm flex items-center gap-2">
             <Activity size={13} className="text-primary" /> System Status
@@ -120,6 +144,7 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
 
 export function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { theme, toggle } = useTheme();
 
   return (
     <>
@@ -136,12 +161,22 @@ export function Sidebar() {
             MedPredict<span className="text-primary">.ai</span>
           </span>
         </div>
-        <button
-          onClick={() => setMobileOpen(true)}
-          className="p-2 rounded-lg hover:bg-secondary/50"
-        >
-          <Menu size={20} />
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Theme toggle in mobile bar */}
+          <button
+            onClick={toggle}
+            className="p-2 rounded-lg hover:bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors"
+            title={theme === "dark" ? "Switch to Light" : "Switch to Dark"}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="p-2 rounded-lg hover:bg-secondary/50"
+          >
+            <Menu size={20} />
+          </button>
+        </div>
       </div>
 
       {/* Mobile drawer overlay */}

@@ -57,10 +57,15 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# CORS — allow Next.js dev server (3000) and prod (same origin)
+# CORS — allow Next.js dev (3000), Docker service, and any same-origin prod
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://frontend:3000",   # Docker service-to-service
+        "http://medpredict-frontend:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

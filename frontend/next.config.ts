@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Standalone output — required for production Docker image
+  output: "standalone",
+
   // Allow next/image to optimise images served from the FastAPI backend.
   // Raw <img> tags are used for dynamic matplotlib PNGs from localhost:8000
   // because Next.js <Image> requires statically-known hosts at build time.

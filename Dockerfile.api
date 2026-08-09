@@ -1,0 +1,23 @@
+# ── FastAPI backend ──────────────────────────────────────────────────────────
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# Install dependencies first (cached layer)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy source code
+COPY src/       ./src/
+COPY main.py    .
+COPY data/      ./data/
+COPY models/    ./models/
+COPY outputs/   ./outputs/
+
+# Create output dirs in case they don't exist in the image
+RUN mkdir -p outputs/figures/eda outputs/figures/evaluation \
+             outputs/metrics outputs/reports
+
+EXPOSE 8000
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

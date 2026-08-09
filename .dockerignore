@@ -1,0 +1,30 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# Git & IDE
+.git/
+.vscode/
+*.md
+
+# Generated artifacts (rebuilt by training)
+outputs/figures/
+outputs/metrics/
+outputs/reports/
+
+# Notebooks
+notebooks/
+
+# Tests
+tests/
+
+# Secrets / env
+.env
+.env.*
